@@ -2,3 +2,4 @@
 /lake-packages
 Cargo.lock
 /target
+.direnv/
