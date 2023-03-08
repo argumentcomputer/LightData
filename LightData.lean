@@ -4,15 +4,15 @@ import YatimaStdLib.DataClasses
 import YatimaStdLib.Either
 
 inductive LightData
-  | byt : ByteArray → LightData
-  | arr : Array LightData → LightData
+  | atom : ByteArray → LightData
+  | cell : Array LightData → LightData
   deriving Inhabited, Ord
 
 namespace LightData
 
 partial def beq : LightData → LightData → Bool
-  | byt x, byt y => x.beq y
-  | arr x, arr y =>
+  | atom x, atom y => x.beq y
+  | cell x, cell y =>
     let rec aux : List LightData → List LightData → Bool
       | _ :: _, []
       | [], _ :: _ => false
@@ -24,14 +24,14 @@ partial def beq : LightData → LightData → Bool
 instance : BEq LightData := ⟨beq⟩
 
 partial def toString : LightData → String
-  | byt x => ToString.toString x
-  | arr x => s!"({", ".intercalate $ x.data.map toString})"
+  | atom x => ToString.toString x
+  | cell x => s!"({", ".intercalate $ x.data.map toString})"
 
 instance : ToString LightData := ⟨toString⟩
 
 section Encoding
 
-def ofNat (x : Nat) : LightData := byt x.toByteArrayLE
+def ofNat (x : Nat) : LightData := atom x.toByteArrayLE
 
 instance : Encodable LightData LightData ε := ⟨id, pure⟩
 
@@ -40,7 +40,7 @@ instance : Encodable Bool LightData String where
   | Bool.true => ofNat 1
   | Bool.false => ofNat 0
   decode 
-  | byt x => match x.asLEtoNat with
+  | atom x => match x.asLEtoNat with
     | 0 => pure Bool.false
     | 1 => pure Bool.true
     | _ => throw s!"Expected a boolean but got {x}"
@@ -49,54 +49,54 @@ instance : Encodable Bool LightData String where
 instance : Encodable Nat LightData String where
   encode := ofNat
   decode
-    | byt bs => pure bs.asLEtoNat
+    | atom bs => pure bs.asLEtoNat
     | x => throw s!"Expected a numeric value but got {x}"
 
 instance : Encodable String LightData String where
-  encode (s: String) := .byt s.toUTF8
+  encode (s: String) := .atom s.toUTF8
   decode
-    | byt x => pure (String.fromUTF8Unchecked x)
+    | atom x => pure (String.fromUTF8Unchecked x)
     | x => throw s!"Expected a string but got {x}"
 
 instance : Encodable ByteArray LightData String where
-  encode := byt
-  decode | byt x => pure x | x => throw s!"Expected a byte array but got {x}"
+  encode := atom
+  decode | atom x => pure x | x => throw s!"Expected a atome cellay but got {x}"
 
 variable
   [hα : Encodable α LightData String]
   [hβ : Encodable β LightData String]
 
 instance : Encodable (Array α) LightData String where
-  encode x := arr $ x.map hα.encode
+  encode x := cell $ x.map hα.encode
   decode
-    | arr x => x.mapM hα.decode
-    | x => throw s!"Expected an array but got {x}"
+    | cell x => x.mapM hα.decode
+    | x => throw s!"Expected an cellay but got {x}"
 
 instance : Encodable (List α) LightData String where
-  encode x := arr $ .mk $ x.map hα.encode
+  encode x := cell $ .mk $ x.map hα.encode
   decode
-    | arr x => x.data.mapM hα.decode
+    | cell x => x.data.mapM hα.decode
     | x => throw s!"Expected a list but got {x}"
 
 instance : Encodable (Option α) LightData String where
-  encode | none => arr #[] | some a => arr $ #[hα.encode a]
+  encode | none => cell #[] | some a => cell $ #[hα.encode a]
   decode
-    | arr #[] => pure none
-    | arr $ #[x] => return some (← hα.decode x)
+    | cell #[] => pure none
+    | cell $ #[x] => return some (← hα.decode x)
     | x => throw s!"Expected an option but got {x}"
 
 instance : Encodable (α × β) LightData String where
-  encode | (a, b) => arr #[hα.encode a, hβ.encode b]
+  encode | (a, b) => cell #[hα.encode a, hβ.encode b]
   decode
-    | arr #[a, b] => return (← hα.decode a, ← hβ.decode b)
+    | cell #[a, b] => return (← hα.decode a, ← hβ.decode b)
     | x => throw s!"Expected a product but got {x}"
 
 instance : Encodable (Either α β) LightData String where
   encode
-    | .left  x => arr #[false, hα.encode x]
-    | .right x => arr #[true, hβ.encode x]
+    | .left  x => cell #[false, hα.encode x]
+    | .right x => cell #[true, hβ.encode x]
   decode
-    | arr #[b, x] => do
+    | cell #[b, x] => do
       let b : Bool ← Encodable.decode b
       if b then return .right (← hβ.decode x)
       else return .left (← hα.decode x)
@@ -118,20 +118,42 @@ def countBytesCore : Nat → Nat → UInt8 → UInt8
 def countBytes (n: Nat) : UInt8 := 
   (countBytesCore (n + 1) n 0)
 
-/--
-The tag stores 1 bit indicating if the LightData is an array or a ByteArray
-and then seven bits of size_bytes indicating the number of bytes of size
-immediately following the tag. The maximum value of size_bytes is 127, but in
-practice, for a UInt64 size field, the value should be 8.
--/
-def tag : LightData → UInt8
-  | byt x => 0b00000000 + countBytes x.size
-  | arr x => 0b10000000 + countBytes x.size
 
-partial def toByteArray (d : LightData) : ByteArray :=
-  match d with
-  | byt x => .mk #[d.tag] ++ x.size.toByteArrayLE ++ x
-  | arr x => x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ ++ x.size.toByteArrayLE
+def uInt8Core : Nat → UInt8 → UInt8
+| 0, x => x
+| fuel + 1, x => uInt8Core fuel (x+1)
+
+def toUInt8 (x: Nat): UInt8 := uInt8Core x 0
+
+/--
+tag format: 0bXYSSSSSS
+The tag stores 1 ctor_bit X indicating if the LightData is an cellay or a ByteArray
+The tag stores 1 small_bit Y indicating if the LightData size is small (<= 64 bytes)
+The tag stores 6 size_bits. If small_bit is set, these size_bits describe the
+data_size, if small_bit is not set, these size_bits describe how many bytes are needed for the data_size
+-/
+def tag : LightData -> UInt8
+| atom x => 
+  let ctor_bit: UInt8 := 0b00000000 
+  let size_bits : UInt8 := if x.size <= 64 then
+    toUInt8 (0b01000000 + (Nat.land 0b00111111 x.size))
+    else countBytes x.size
+  ctor_bit + size_bits
+| cell x =>
+  let ctor_bit: UInt8 := 0b10000000 
+  let size_bits : UInt8 := if x.size <= 64 then
+    toUInt8 (0b01000000 + (Nat.land 0b00111111 x.size))
+    else countBytes x.size
+  ctor_bit + size_bits
+
+partial def toByteArray : LightData -> ByteArray
+| d@(atom x) => if x.size <= 64 
+  then .mk #[d.tag] ++  x
+  else .mk #[d.tag] ++ x.size.toByteArrayLE ++ x
+| d@(cell x) => if x.size <= 64 
+  then x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩
+  else x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ ++ x.size.toByteArrayLE
+
 
 structure Bytes where
   bytes : ByteArray
@@ -148,9 +170,13 @@ def readUInt8 : OfBytesM UInt8 := do
     return ctx.bytes.get ⟨idx, by rw [ctx.valid]; exact h⟩
   else throw "No more bytes to read"
 
-def readTag : OfBytesM (Nat × Nat) := do
+def readTag : OfBytesM (Bool × Bool × Nat) := do
   let x ← readUInt8
-  return (Nat.land x.val 0b10000000, Nat.land x.val 0b1111111)
+  let ctor_bit : Bool := Nat.land x.val 0b10000000 == 0b10000000
+  let small_bit : Bool := (Nat.land x.val 0b01000000) == 0b01000000
+  let size := (Nat.land x.val 0b00111111)
+  let size := if small_bit && size == 0 then 64 else size
+  return (ctor_bit, small_bit, size)
 
 def readByteVector (n : Nat) : OfBytesM $ ByteVector n := do
   let idx ← get
@@ -162,17 +188,23 @@ def readByteVector (n : Nat) : OfBytesM $ ByteVector n := do
 
 partial def readLightData : OfBytesM LightData := do
   match ← readTag with
-  | (0, x) => do
+  | (.false, .true, size) => return atom (← readByteVector size).1
+  | (.false, .false, x) => do
     let size := (← readByteVector x).data.asLEtoNat
-    return byt (← readByteVector size).1
-  | (1, x) => do
-    let size := (← readByteVector x).data.asLEtoNat
-    return arr $ ← List.range size |>.foldlM (init := #[])
+    return atom (← readByteVector size).1
+  | (.true, .true, size) => 
+    return cell $ ← List.range size |>.foldlM (init := #[])
       fun acc _ => do pure $ acc.push (← readLightData)
-  | x => throw s!"Invalid LightData tag: {x}"
+  | (.true, .false, x) => do
+    let size := (← readByteVector x).data.asLEtoNat
+    return cell $ ← List.range size |>.foldlM (init := #[])
+      fun acc _ => do pure $ acc.push (← readLightData)
 
 def ofByteArray (bytes : ByteArray) : Except String LightData :=
   (StateT.run (ReaderT.run readLightData ⟨bytes, bytes.size, rfl⟩) 0).1
+
+def roundtrip [Encodable α LightData String] (x: α) : Except String α := do
+  ofByteArray (toByteArray (Encodable.encode x)) >>= Encodable.decode
 
 instance : Encodable LightData ByteArray String where
   encode := toByteArray
