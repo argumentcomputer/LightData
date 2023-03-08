@@ -2,6 +2,7 @@ import LSpec
 import LightData
 
 def data : List LightData := [
+  .atom default, .cell default,
   true, false, 0, 1, 255, 256, 300, 300000, "", "aaa", "\\", "\"",
   .atom ⟨#[1, 2, 3]⟩, .cell #[.atom ⟨#[1, 2, 3]⟩],
   (none : Option Nat), some 3, some (some 2), ("ars", 3, some #[3]),
