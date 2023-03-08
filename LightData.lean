@@ -37,14 +37,14 @@ instance : Encodable LightData LightData ε := ⟨id, pure⟩
 
 instance : Encodable Bool LightData String where
   encode
-  | Bool.true => ofNat 1
-  | Bool.false => ofNat 0
-  decode 
-  | atom x => match x.asLEtoNat with
-    | 0 => pure Bool.false
-    | 1 => pure Bool.true
-    | _ => throw s!"Expected a boolean but got {x}"
-  | x => throw s!"Expected a boolean but got {x}" 
+    | Bool.true => ofNat 1
+    | Bool.false => ofNat 0
+  decode
+    | atom x => match x.asLEtoNat with
+      | 0 => pure Bool.false
+      | 1 => pure Bool.true
+      | _ => throw s!"Expected a boolean but got {x}"
+    | x => throw s!"Expected a boolean but got {x}"
 
 instance : Encodable Nat LightData String where
   encode := ofNat
@@ -111,49 +111,49 @@ section SerDe
 def countBytesCore : Nat → Nat → UInt8 → UInt8
   | 0, _, x => x
   | fuel + 1, n, x =>
-    let n' := n / 256
-    if n' = 0 then x
-    else countBytesCore fuel n' (x+1)
+    let n := n / 256
+    if n == 0 then x
+    else countBytesCore fuel n (x+1)
 
-def countBytes (n: Nat) : UInt8 := 
+def countBytes (n: Nat) : UInt8 :=
   (countBytesCore (n + 1) n 0)
 
-
 def uInt8Core : Nat → UInt8 → UInt8
-| 0, x => x
-| fuel + 1, x => uInt8Core fuel (x+1)
+  | 0, x => x
+  | fuel + 1, x => uInt8Core fuel (x+1)
 
 def toUInt8 (x: Nat): UInt8 := uInt8Core x 0
 
 /--
 tag format: 0bXYSSSSSS
-The tag stores 1 ctor_bit X indicating if the LightData is an cellay or a ByteArray
-The tag stores 1 small_bit Y indicating if the LightData size is small (<= 64 bytes)
-The tag stores 6 size_bits. If small_bit is set, these size_bits describe the
-data_size, if small_bit is not set, these size_bits describe how many bytes are needed for the data_size
+* The tag stores 1 ctorBit X indicating if the LightData is an cellay or a ByteArray
+* The tag stores 1 smallBit Y indicating if the LightData size is small (<= 64 bytes)
+* The tag stores 6 sizeBits. If smallBit is set, these sizeBits describe the
+  dataSize, if smallBit is not set, these sizeBits describe how many bytes are
+  needed for the dataSize
 -/
-def tag : LightData -> UInt8
-| atom x => 
-  let ctor_bit: UInt8 := 0b00000000 
-  let size_bits : UInt8 := if x.size <= 64 then
-    toUInt8 (0b01000000 + (Nat.land 0b00111111 x.size))
-    else countBytes x.size
-  ctor_bit + size_bits
-| cell x =>
-  let ctor_bit: UInt8 := 0b10000000 
-  let size_bits : UInt8 := if x.size <= 64 then
-    toUInt8 (0b01000000 + (Nat.land 0b00111111 x.size))
-    else countBytes x.size
-  ctor_bit + size_bits
+def tag : LightData → UInt8
+  | atom x =>
+    if x.isEmpty then 0b00000000 else
+    let ctorBit := 0b00000000
+    let sizeBits := if x.size <= 64 then
+      toUInt8 (0b01000000 + (x.size.land 0b00111111))
+      else countBytes x.size
+    ctorBit + sizeBits
+  | cell x => if x.isEmpty then 0b10000000 else
+    let ctorBit := 0b10000000
+    let sizeBits := if x.size <= 64 then
+      toUInt8 (0b01000000 + (x.size.land 0b00111111))
+      else countBytes x.size
+    ctorBit + sizeBits
 
-partial def toByteArray : LightData -> ByteArray
-| d@(atom x) => if x.size <= 64 
-  then .mk #[d.tag] ++  x
-  else .mk #[d.tag] ++ x.size.toByteArrayLE ++ x
-| d@(cell x) => if x.size <= 64 
-  then x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩
-  else x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ ++ x.size.toByteArrayLE
-
+partial def toByteArray : LightData → ByteArray
+  | d@(atom x) => if x.size <= 64
+    then .mk #[d.tag] ++ x
+    else .mk #[d.tag] ++ x.size.toByteArrayLE ++ x
+  | d@(cell x) => if x.size <= 64
+    then x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩
+    else x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ ++ x.size.toByteArrayLE
 
 structure Bytes where
   bytes : ByteArray
@@ -172,11 +172,11 @@ def readUInt8 : OfBytesM UInt8 := do
 
 def readTag : OfBytesM (Bool × Bool × Nat) := do
   let x ← readUInt8
-  let ctor_bit : Bool := Nat.land x.val 0b10000000 == 0b10000000
-  let small_bit : Bool := (Nat.land x.val 0b01000000) == 0b01000000
+  let ctorBit : Bool := Nat.land x.val 0b10000000 == 0b10000000
+  let smallBit : Bool := (Nat.land x.val 0b01000000) == 0b01000000
   let size := (Nat.land x.val 0b00111111)
-  let size := if small_bit && size == 0 then 64 else size
-  return (ctor_bit, small_bit, size)
+  let size := if smallBit && size == 0 then 64 else size
+  return (ctorBit, smallBit, size)
 
 def readByteVector (n : Nat) : OfBytesM $ ByteVector n := do
   let idx ← get
@@ -192,7 +192,7 @@ partial def readLightData : OfBytesM LightData := do
   | (.false, .false, x) => do
     let size := (← readByteVector x).data.asLEtoNat
     return atom (← readByteVector size).1
-  | (.true, .true, size) => 
+  | (.true, .true, size) =>
     return cell $ ← List.range size |>.foldlM (init := #[])
       fun acc _ => do pure $ acc.push (← readLightData)
   | (.true, .false, x) => do
