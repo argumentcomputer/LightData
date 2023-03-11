@@ -135,8 +135,8 @@ partial def toByteArray : LightData → ByteArray
     then .mk #[d.tag] ++ x
     else .mk #[d.tag] ++ x.size.toByteArrayLE ++ x
   | d@(cell x) => if x.size <= 64
-    then x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩
-    else x.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ ++ x.size.toByteArrayLE
+    then Array.foldl (·.append ·.toByteArray) ⟨#[d.tag]⟩ x
+    else Array.foldl (·.append ·.toByteArray) (⟨#[d.tag]⟩ ++ x.size.toByteArrayLE) x
 
 structure Bytes where
   bytes : ByteArray
