@@ -19,4 +19,6 @@ def main := lspecIO $
   mkRoundtripTests [#[0, 1, 2, 3], #[]] ++
   mkRoundtripTests [#[#[1, 2, 3]], #[#[]]] ++
   mkRoundtripTests [none, some 2] ++
-  mkRoundtripTests [none, some #["hi", "bye"]]
+  mkRoundtripTests [none, some #["hi", "bye"]] ++
+  mkRoundtripTests (List.range 66) ++
+  mkRoundtripTests (List.range 256)
