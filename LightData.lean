@@ -104,9 +104,9 @@ end EncodableInstances
 
 section SerDe
 
--- TODO: make it faster
 def countBytes (n : Nat) : UInt8 :=
-  UInt8.ofNat n.toByteArrayLE.size
+  if n == 0 then 1 else
+  .ofNat $ n.log2 / 8 + 1
 
 /--
 tag format: 0bXYSSSSSS
