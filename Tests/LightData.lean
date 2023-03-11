@@ -10,9 +10,7 @@ def mkRoundtripTests (as : List α) : TestSeq :=
     tSeq ++ withExceptOk s!"{a} deserializes" (LightData.roundtrip a)
       fun a' => test s!"{a} roundtrips" (a == a')
 
-#lspec mkRoundtripTests [List.range 65]
-
-#eval (List.range 65 : LightData).toByteArray -- b[10000000,01000001,00000000,⋯]
+#lspec mkRoundtripTests [List.range 2000]
 
 def main := lspecIO $
   mkRoundtripTests [false, true] ++
