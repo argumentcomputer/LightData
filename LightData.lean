@@ -75,7 +75,7 @@ instance : Encodable UInt64 LightData where
 instance : Encodable String LightData where
   encode s := atom s.toUTF8
   decode
-    | atom x => return String.fromUTF8Unchecked x
+    | atom x => return .fromUTF8! x
     | x => throw s!"Expected a string but got {x}"
 
 instance : Encodable ByteArray LightData where
